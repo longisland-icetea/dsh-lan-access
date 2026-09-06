@@ -29,8 +29,10 @@ See `README.zh.md` (Chinese) for the full guide; the English summary:
   address and survive a `dsh web` restart (the signing secret is persisted);
   they die on expiry, on deleting `.credentials.yaml`, or when the browser
   clears them. Needs a restart to change.
-- **Install**: `dsh plugin --profile web add dsh-lan-access` (or add the local
-  directory), then restart `dsh web`.
+- **Install**: `dsh plugin --profile web add github:longisland-icetea/dsh-lan-access`
+  (`dsh plugin --profile web update dsh-lan-access` to upgrade), then restart
+  `dsh web`. ⚠️ The `dsh-lan-access` package on npm is a *different* project by
+  another author — this plugin is only distributed from GitHub, not npm.
 - **Use**: Settings → “LAN Access” tab → enable, enter the LAN IP(s) (or pick
   from the detected list), save, restart.
 - **Upgrades**: wiring is id-targeted patches with warned-skip semantics and a

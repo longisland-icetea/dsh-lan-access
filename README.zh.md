@@ -24,10 +24,12 @@
 ## 安装
 
 ```bash
-dsh plugin --profile web add dsh-lan-access      # 已发布到 npm 时
-# 或本地目录：
-dsh plugin --profile web add /path/to/dsh-lan-access
+dsh plugin --profile web add github:longisland-icetea/dsh-lan-access
+# 后续升级：
+dsh plugin --profile web update dsh-lan-access
 ```
+
+> ⚠️ **npm 上的 `dsh-lan-access` 是别人的包**（Leon0555，`0.1.3`，bind 0.0.0.0 + `crypto.randomUUID` polyfill），与本插件无关。本插件目前**只从 GitHub 安装**，不发布到 npm。
 
 然后重启 `dsh web`（重启后设置页即可见“局域网访问”选项卡）。
 
