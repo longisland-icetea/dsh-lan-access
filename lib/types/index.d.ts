@@ -6,6 +6,8 @@ export interface LanAccessSettings {
 	accessHosts: string[];
 	/** Repair the client settings layer on non-loopback visits; defaults to true. */
 	rescueSettings: boolean;
+	/** Browser-session cookie lifetime in days (1..3650, default 30). */
+	sessionDays: number;
 }
 
 /** A boot-time snapshot consumed by the patched `webserver`/`connection` rows. */
@@ -18,6 +20,8 @@ export interface LanAccessSnapshot {
 	readonly trustedHosts: readonly string[];
 	/** Whether the browser half may repair the client settings layer. */
 	readonly rescueSettings: boolean;
+	/** Browser-session cookie lifetime in days handed to the `connection` row. */
+	readonly sessionDays: number;
 }
 
 export interface LanCandidate {
@@ -28,7 +32,7 @@ export interface LanCandidate {
 }
 
 export interface LanAccessOverview {
-	configured: { enabled: boolean; accessHosts: string[]; rescueSettings: boolean };
+	configured: { enabled: boolean; accessHosts: string[]; rescueSettings: boolean; sessionDays: number };
 	live: { bindHost: string | undefined; port: number | undefined; trustedHosts: string[] };
 	wired: { webserver: boolean; connection: boolean; verified: boolean };
 	candidates: LanCandidate[];

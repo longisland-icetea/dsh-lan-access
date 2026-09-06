@@ -50,3 +50,7 @@
   inject: [webRuntime, lanAccess]
   config:
     trustedHosts: !!js 'ctx.lanAccess.trustedHosts.length > 0 ? [...new Set(ctx.lanAccess.trustedHosts)] : [...new Set(ctx.webRuntime.trustedHosts)]'
+    # Browser-session cookie lifetime: the plugin's `sessionDays` (default 30,
+    # the dsh default) decides how long a device stays authenticated after one
+    # token visit. The row is restated in full, so this value lives here too.
+    cookieMaxAgeDays: !!js ctx.lanAccess.sessionDays

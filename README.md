@@ -24,6 +24,11 @@ See `README.zh.md` (Chinese) for the full guide; the English summary:
   there, so nothing can be read or persisted. The plugin shadows the shipped
   welcome notice and repairs the settings mirror; opt out of the latter with
   `rescueSettings: false` in the `lan-access` section of `settings.yaml`.
+- **Session lifetime**: `sessionDays` (default 30, range 1–3650) sets how long a
+  device stays authenticated after one token visit. Cookies are per access
+  address and survive a `dsh web` restart (the signing secret is persisted);
+  they die on expiry, on deleting `.credentials.yaml`, or when the browser
+  clears them. Needs a restart to change.
 - **Install**: `dsh plugin --profile web add dsh-lan-access` (or add the local
   directory), then restart `dsh web`.
 - **Use**: Settings → “LAN Access” tab → enable, enter the LAN IP(s) (or pick

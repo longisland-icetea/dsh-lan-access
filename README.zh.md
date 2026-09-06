@@ -65,11 +65,21 @@ lan-access:
 
 关闭后上述第 2 项完全不执行（第 1 项仍在，它只走公开槽位，不碰 dsh 内部结构）。
 
+### 浏览器会话有效期（`sessionDays`）
+
+用带 token 的地址访问一次后，cookie 会在那台设备上保存 `sessionDays` 天，期间直接打开干净地址即可，不必再翻启动日志。要点：
+
+- 默认 **30**（等于 dsh 原值），可调范围 **1–3650**；设置页「浏览器会话有效期（天）」，或写进 `settings.yaml` 的 `lan-access.sessionDays`。改动需重启 `dsh web`。
+- cookie 按**访问地址**（host:port）分别保存，`.2` 与 `.5` 各一份，互不影响。
+- **重启 dsh 不会让 cookie 失效** —— 校验只用到 `~/.dsh/.credentials.yaml` 里持久化的签名密钥，不含进程随机数。真正的失效条件是：到期、删了 `.credentials.yaml`、或浏览器清了 cookie。
+- 调大的代价：拿到那台设备的人在这段时间内都能直接操作 Harness。
+
 ## 工作原理（插件结构）
 
 - **`cordis.patch.yml`**（bundle 层）：插入插件自身行 `lan-access`，并按 id 覆盖 `webserver`、`connection` 两行的配置。
   - `webserver.host = ctx.lanAccess.bindHost ?? ctx.webStartup.host ?? '127.0.0.1'`
   - `connection.trustedHosts = 插件信任表非空 ? 插件信任表 : webRuntime 信任表`（**严格围栏**：配置即策略，见下）
+  - `connection.cookieMaxAgeDays = ctx.lanAccess.sessionDays`（浏览器会话有效期，默认 30）
 - **宿主端 `lib/index.js`**：注册 `lan-access` 设置命名空间（`enabled` + `accessHosts`），提供 `lanAccess` 快照服务，暴露一个 Typert Remote（`lanAccess/overview`），启动后校验两层覆盖是否真正生效，并打印带 token 的局域网 URL。
 - **浏览器端 `lib/client.js`**：注册“局域网访问”设置选项卡（`settings.section` 槽位），读写 `remote.settings`，调用 `lanAccess/overview` 展示本机 IP 候选和生效状态。
 
