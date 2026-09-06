@@ -1,0 +1,52 @@
+# dsh-lan-access bundle patch: opens the Web profile's LAN access fences.
+# Applied after the dsh-web-app layer, so the rows below override the
+# webserver and connection rows this plugin owns.
+#
+# What this layer changes:
+#   - `webserver`: bind host is taken from the plugin's `lanAccess` service
+#     first (0.0.0.0 when the plugin is enabled), falling back to the CLI
+#     --host value, then 127.0.0.1. The row is RESTATED in full because a
+#     patch replaces the target row's whole config.
+#   - `connection`: the /api browser-trust fence accepts the plugin's
+#     configured LAN hosts in addition to the deployment-derived LAN trust.
+#
+# Upgrade behavior: a row id that no longer exists warns and is skipped
+# (never a boot failure), and the plugin verifies at boot whether its wiring
+# actually took effect. If dsh ever gains a NEW guardrail (for example the
+# webserver schema stops accepting 0.0.0.0), that guardrail wins and the
+# plugin reports the drift.
+
+# ── the plugin's own host row ────────────────────────────────────────────────
+
+- insert:
+    - id: lan-access
+      name: 'dsh-lan-access'
+      inject: [settings]
+
+# ── bind all interfaces when enabled (the webserver schema allows only
+#    127.0.0.1 / 0.0.0.0; a specific LAN IP is expressed as: bind all +
+#    trust the chosen IP on the fence) ───────────────────────────────────────
+
+- id: webserver
+  inject: [webStartup, lanAccess]
+  config:
+    host: !!js ctx.lanAccess.bindHost ?? ctx.webStartup.host ?? '127.0.0.1'
+    port: !!js ctx.webStartup.port ?? 3080
+    compression: gzip
+    compressionLevel: 1
+    compressionThresholdBytes: 1024
+
+# ── strict /api browser-trust fence: the configured hosts ARE the policy ─────
+
+# dsh itself trusts every non-internal IPv4 address whenever the webserver
+# binds 0.0.0.0 (web-app `resolveLanTrust`), so a plain union with
+# `ctx.webRuntime.trustedHosts` silently re-trusts a host the user just
+# removed from accessHosts. While anything is configured, only those
+# authorities pass the fence; the automatic LAN list is a fallback for an
+# enabled-but-empty configuration, which would otherwise lock every LAN
+# visitor out with 403.
+
+- id: connection
+  inject: [webRuntime, lanAccess]
+  config:
+    trustedHosts: !!js 'ctx.lanAccess.trustedHosts.length > 0 ? [...new Set(ctx.lanAccess.trustedHosts)] : [...new Set(ctx.webRuntime.trustedHosts)]'

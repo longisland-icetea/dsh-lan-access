@@ -1,0 +1,74 @@
+{
+  "name": "dsh-lan-access",
+  "version": "0.2.0",
+  "author": "icetea <cxxiao@zzu.edu.cn>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/longisland-icetea/dsh-lan-access.git"
+  },
+  "homepage": "https://github.com/longisland-icetea/dsh-lan-access#readme",
+  "bugs": {
+    "url": "https://github.com/longisland-icetea/dsh-lan-access/issues"
+  },
+  "description": "Open the DeepSeek Harness Web LAN access fences: serve on all interfaces, trust only the configured LAN authorities, and show a settings tab to choose them.",
+  "engines": {
+    "node": ">=20.18.1"
+  },
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./lib/types/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "lib/types/**/*.d.ts",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-api-remotes"
+      ],
+      "platform": "web"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    }
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "plugin",
+    "lan",
+    "lan-access",
+    "network",
+    "remote-access"
+  ],
+  "license": "MIT"
+}
