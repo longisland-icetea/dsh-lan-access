@@ -53,4 +53,7 @@
     # Browser-session cookie lifetime: the plugin's `sessionDays` (default 30,
     # the dsh default) decides how long a device stays authenticated after one
     # token visit. The row is restated in full, so this value lives here too.
+    # `lanAccess.noAuth` needs nothing here: it is applied by the plugin's own
+    # host half (lib/index.js `disableBrowserAuth`), which swaps the service's
+    # session checks instead of anything this row's config owns.
     cookieMaxAgeDays: !!js ctx.lanAccess.sessionDays

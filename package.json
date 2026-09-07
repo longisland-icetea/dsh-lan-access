@@ -1,6 +1,6 @@
 {
   "name": "dsh-lan-access",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "author": "icetea <cxxiao@zzu.edu.cn>",
   "license": "MIT",
   "repository": {
@@ -14,6 +14,9 @@
   "description": "Open the DeepSeek Harness Web LAN access fences: serve on all interfaces, trust only the configured LAN authorities, and show a settings tab to choose them.",
   "engines": {
     "node": ">=20.18.1"
+  },
+  "scripts": {
+    "test": "node --test test/*.mjs"
   },
   "type": "module",
   "main": "./lib/index.js",

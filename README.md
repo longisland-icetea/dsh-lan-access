@@ -29,6 +29,11 @@ See `README.zh.md` (Chinese) for the full guide; the English summary:
   address and survive a `dsh web` restart (the signing secret is persisted);
   they die on expiry, on deleting `.credentials.yaml`, or when the browser
   clears them. Needs a restart to change.
+- **No authentication (0.4.0)**: `noAuth: true` removes the browser session gate
+  altogether — no launch token, no cookie, no 401. The Host/Origin trust fence
+  stays (hosts outside `accessHosts` are still `403`); everything else becomes
+  your network's job. Needs a restart. `sessionDays` has no meaning while it is
+  on.
 - **Install**: `dsh plugin --profile web add github:longisland-icetea/dsh-lan-access`
   (`dsh plugin --profile web update dsh-lan-access` to upgrade), then restart
   `dsh web`. ⚠️ The `dsh-lan-access` package on npm is a *different* project by

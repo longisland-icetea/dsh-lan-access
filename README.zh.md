@@ -10,14 +10,14 @@
 
 ## 它解决什么
 
-`dsh web` 有三层局域网护栏，本插件全部打开：
+`dsh web` 有四层局域网护栏，本插件全部打开：
 
 | 护栏 | 位置 | 本插件的处理 |
 | --- | --- | --- |
 | 默认只监听 `127.0.0.1` | `dsh-host-webserver`（host schema 仅允许 `127.0.0.1` / `0.0.0.0`） | 启用后通过 patch 层把 `webserver` 行的 host 设为 `0.0.0.0`（全接口监听） |
 | CLI 拒绝 `--host 0.0.0.0` | `dsh-web-app/startup` | 走组合配置路径（patch 层），不经过 CLI 护栏；README 末尾有说明 |
 | `/api` 浏览器信任围栏 | `dsh-client-connection` 的 `trustedHosts` | 围栏**只**信任你填写的地址；只有当你一个地址都没填时，才回退到 dsh 自动派生的信任项（见「严格围栏」） |
-| 浏览器会话认证（token/ cookie） | `dsh-client-connection` | 启动时打印带 token 的局域网 URL；首次访问用 token URL 换取 cookie 后即可正常使用 |
+| 浏览器会话认证（token/ cookie） | `dsh-client-connection` | 启动时打印带 token 的局域网 URL；首次访问用 token URL 换取 cookie 后即可正常使用（**这一层可以用 `noAuth` 整层关掉**，见「免鉴权」） |
 
 因为 webserver schema 只允许 `127.0.0.1` / `0.0.0.0`，插件不直接绑定某个具体 IP，而是：**监听所有网卡（0.0.0.0）+ 信任你配置的地址**。访问地址在设置页配置，效果与“绑定到这个局域网 IP”等价，且接口晚于启动出现（如 VPN 后启动）也不影响。
 
@@ -39,6 +39,7 @@ dsh plugin --profile web update dsh-lan-access
 2. 勾选“打开局域网访问”，在“访问地址（局域的 IP）”里填你要用来访问的地址（可逗号分隔多个），也可以点“使用”自动填充检测到的本机 IPv4 地址。
 3. 点“保存”，重启 `dsh web` 生效。
 4. 重启后终端会打印 `dsh-lan-access: LAN: http://<ip>:<port>/?token=...`。局域网设备用这个完整地址首次访问（换取浏览器 cookie），之后直接用干净地址即可。
+5. 不想做这一步、也不想被 cookie 到期/清缓存打断，就勾“免鉴权”：见下节。
 
 ## 严格围栏（0.2.0 起，破坏性变更）
 
@@ -76,13 +77,42 @@ lan-access:
 - **重启 dsh 不会让 cookie 失效** —— 校验只用到 `~/.dsh/.credentials.yaml` 里持久化的签名密钥，不含进程随机数。真正的失效条件是：到期、删了 `.credentials.yaml`、或浏览器清了 cookie。
 - 调大的代价：拿到那台设备的人在这段时间内都能直接操作 Harness。
 
+### 免鉴权（`noAuth`，0.4.0 起）
+
+cookie 路径有个麻烦：换新设备、换浏览器、清了 cookie、或 cookie 到期，都得回头翻启动日志找那串 token。设置页「免鉴权（去掉启动 token 与 cookie 登录）」把这层整个摘掉——之后任何能连到这个端口的人直接就能用，不需要任何凭据：
+
+```yaml
+lan-access:
+  enabled: true
+  accessHosts:
+    - 192.168.255.5
+  noAuth: true
+```
+
+生效方式（宿主机侧，见 `lib/index.js` 的 `disableBrowserAuth`）：`client-connection` 只问两个问题，插件把这两个答案换掉——
+
+| 原方法 | 原行为 | 免鉴权后 |
+| --- | --- | --- |
+| `requestRejection(request)` | Host/Origin 不信任 → `403`；没有有效 cookie → `401` | **只**去掉 `401`；`403`（`trustedHosts` 围栏）原样保留 |
+| `authorizeIndex(request, response)` | 首屏要么拿 `?token=` 换 cookie，要么出示 cookie | 一律放行；碰到陈旧的 `?token=` 书签则 303 跳回干净地址 |
+| `authenticatedUrl(baseUrl)` | 拼上 `?token=…` | 原样返回，启动日志那行 `LAN:` 也不再带 token |
+
+要点：
+
+- **默认关闭**。开启后 `sessionDays` 不再有意义（没有任何会话需要保活），设置页会把那一项置灰。
+- **与「打开局域网访问」相互独立**：`noAuth` 只管要不要凭据，不管监听地址。开着它、关掉局域网访问，本机 `127.0.0.1` 同样免登录。
+- **Host/Origin 围栏仍在**：不在「访问地址」里的 Host 依旧 `403`。这层不是“登录”，是防 DNS rebinding / 跨站调用 `/api` 的，摘掉它等于把你浏览器里任何网页都变成 Harness 的客户端，所以本插件不提供这个开关。
+- **其余全部交给网络**：虚拟局域网 / VPN / 防火墙 / 网段隔离，谁都行——但请确认它们真的挡住了不该来的人。
+- 改动需要重启 `dsh web`；生效时启动日志会打印 `dsh-lan-access: browser authentication removed (noAuth) ...`。若打印的是 `... exposes no browser authentication to remove`，说明你装的 dsh 改了 `connection` 的方法名，此时 dsh 的登录照旧（插件不会假装成功）。
+- 它改的是 `connection` 服务**原型**上的方法（dsh 内部结构）。补丁带还原函数，挂在插件 fiber 上随插件卸载一起撤销；和「设置层救援」一样，最坏情况是降级回 dsh 原行为，不会白屏。
+
 ## 工作原理（插件结构）
 
 - **`cordis.patch.yml`**（bundle 层）：插入插件自身行 `lan-access`，并按 id 覆盖 `webserver`、`connection` 两行的配置。
   - `webserver.host = ctx.lanAccess.bindHost ?? ctx.webStartup.host ?? '127.0.0.1'`
   - `connection.trustedHosts = 插件信任表非空 ? 插件信任表 : webRuntime 信任表`（**严格围栏**：配置即策略，见下）
   - `connection.cookieMaxAgeDays = ctx.lanAccess.sessionDays`（浏览器会话有效期，默认 30）
-- **宿主端 `lib/index.js`**：注册 `lan-access` 设置命名空间（`enabled` + `accessHosts`），提供 `lanAccess` 快照服务，暴露一个 Typert Remote（`lanAccess/overview`），启动后校验两层覆盖是否真正生效，并打印带 token 的局域网 URL。
+- **宿主端 `lib/index.js`**：注册 `lan-access` 设置命名空间（`enabled` + `accessHosts` + `rescueSettings` + `noAuth` + `sessionDays`），提供 `lanAccess` 快照服务，暴露一个 Typert Remote（`lanAccess/overview`），启动后校验两层覆盖是否真正生效，按 `noAuth` 决定是否摘掉浏览器鉴权，并打印局域网 URL（免鉴权时不带 token）。
 - **浏览器端 `lib/client.js`**：注册“局域网访问”设置选项卡（`settings.section` 槽位），读写 `remote.settings`，调用 `lanAccess/overview` 展示本机 IP 候选和生效状态。
 
 插件**零运行时依赖**（宿主端只 import Node 内置模块；设置 schema 为可调用对象，Remote 用鸭子类型绑定），因此无论以 registry、tarball 还是本地 `link:` 安装都能工作，也不与 dsh 安装里的模块副本发生实例冲突。
@@ -93,7 +123,7 @@ lan-access:
 
 - 所有针对 dsh 内部行的修改都是**按 id 的 patch**；某行 id 或结构变化时，patch 会警告并跳过（不会让 dsh 启动失败），插件启动时还会再校验一次并打印 `dsh-lan-access: LAN wiring did NOT take effect ...`。
 - 插件只依赖稳定的公开接缝：`settings` 服务、`webStartup` / `webRuntime` 服务形状、`connection` 的 `trustedHosts`、`settings.section` / `settings.onboarding` 槽位、`remote.settings`。
-- 唯一碰 dsh 内部结构的地方是「设置层救援」对 `SettingsScopeController` 原型的补丁，它整段包在 `try/catch` 里：dsh 若改了这个类，最坏结果是救援静默失效（那几个卡片继续报 `settings are unavailable`），不会白屏或启动失败。可用 `rescueSettings: false` 彻底关掉。
+- 唯一碰 dsh 内部结构的两处是「设置层救援」对 `SettingsScopeController` 原型、以及「免鉴权」对 `connection` 服务原型的补丁，都整段包在 `try/catch` 里（免鉴权找不到目标方法时只警告并跳过）：dsh 若改了这些类，最坏结果是相应功能静默失效（救援失效则那几个卡片继续报 `settings are unavailable`；免鉴权失效则继续要 token），不会白屏或启动失败。可分别用 `rescueSettings: false` / `noAuth: false` 关掉。
 - 如果在升级后看到 `wiring did NOT take effect`，按 README 的“排查”一节处理即可。
 
 唯一无法防护的是 dsh 侧**新增护栏**（例如 webserver schema 以后拒绝 `0.0.0.0`，或 CLI 护栏搬到配置层）——那种情况下护栏会赢，插件会如实报告降级状态。
@@ -105,13 +135,16 @@ lan-access:
 | 设置页选项卡不显示 | 插件行未挂载：检查 `dsh --profile web --dump-config` 里是否有 `lan-access` 行；确认 profile 的 `dsh.profile.bundles` 含 `dsh-lan-access` |
 | 启动日志出现 `LAN wiring did NOT take effect` | 你安装的 dsh 版本改了 `webserver` / `connection` 行的 id 或结构；检查 `cordis.patch.yml` 中的目标行是否仍存在，必要时更新插件 |
 | 局域网访问打不开（403） | 围栏未信任该地址：确认设置里填的地址规范（纯 IP 或 域名，`host:port` 均可），或该地址不在 webserver 正在监听的网卡上 |
-| 局域网访问提示 401 | 需要带 token 的 URL 先换 cookie；重启 `dsh web` 看打印的 `dsh-lan-access: LAN:` 行 |
+| 局域网访问提示 401 | 需要带 token 的 URL 先换 cookie；重启 `dsh web` 看打印的 `dsh-lan-access: LAN:` 行。不想每次都来这一遍就开 `noAuth` |
+| 开了 `noAuth` 还是 401 | 改动需重启 `dsh web`；重启后看日志里有没有 `browser authentication removed (noAuth)`。若出现 `exposes no browser authentication to remove`，说明该 dsh 版本的 `connection` 方法名变了，插件未接管（dsh 登录照旧） |
 | 从局域网地址打开时报错 `settings are unavailable in this browser` | 设置层内存模式；确认 `rescueSettings` 未关闭，并且页面是从受信任地址打开的（严格围栏下未配置地址时会回退到 dsh 自动信任） |
 | 从局域网地址打开时所有设置项都改不动、刷新后丢失 | 同上：这是 dsh 对非回环页面的既定行为，救援只补读取与写入通道；要完整体验请从 `127.0.0.1` 打开 |
 
 ## 安全说明
 
 局域网访问等于把具备代码执行能力的界面暴露给该网段。**只在可信网络启用**，不要转发票面显示的带 token URL；token 每进程随机，cookie 按访问主机绑定。
+
+开启 `noAuth` 后连这层凭据也没有了：任何能连到该端口的人都能直接操作 Harness。此时你的**网络**是唯一的门（虚拟局域网 / VPN / 防火墙 / 网段隔离），而 Host/Origin 围栏只是防止别人借你的浏览器跨站调用 `/api`，不是访问控制。
 
 ## 与 `--host 0.0.0.0` 护栏的关系
 
