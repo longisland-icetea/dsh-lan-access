@@ -1,6 +1,6 @@
 {
   "name": "dsh-lan-access",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "author": "icetea <cxxiao@zzu.edu.cn>",
   "license": "MIT",
   "repository": {
@@ -72,6 +72,5 @@
     "lan-access",
     "network",
     "remote-access"
-  ],
-  "license": "MIT"
+  ]
 }

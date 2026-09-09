@@ -1,59 +1,32 @@
-# dsh-lan-access bundle patch: opens the Web profile's LAN access fences.
-# Applied after the dsh-web-app layer, so the rows below override the
-# webserver and connection rows this plugin owns.
+# dsh-lan-access bundle patch.
 #
-# What this layer changes:
-#   - `webserver`: bind host is taken from the plugin's `lanAccess` service
-#     first (0.0.0.0 when the plugin is enabled), falling back to the CLI
-#     --host value, then 127.0.0.1. The row is RESTATED in full because a
-#     patch replaces the target row's whole config.
-#   - `connection`: the /api browser-trust fence accepts the plugin's
-#     configured LAN hosts in addition to the deployment-derived LAN trust.
+# THE ROWS ARE NOT PATCHED. The plugin owns the `webserver` and `connection`
+# rows at RUNTIME only (see lib/index.js): on activation it rewrites their
+# config through the loader (0.0.0.0 + the configured authorities, and the
+# optional cookie lifetime), and on deactivation it restores them to exactly
+# the config dsh-web-app's own layer declares. They stay the official rows,
+# so:
 #
-# Upgrade behavior: a row id that no longer exists warns and is skipped
-# (never a boot failure), and the plugin verifies at boot whether its wiring
-# actually took effect. If dsh ever gains a NEW guardrail (for example the
-# webserver schema stops accepting 0.0.0.0), that guardrail wins and the
-# plugin reports the drift.
-
-# ── the plugin's own host row ────────────────────────────────────────────────
+#   - a dshmarket disable of this package writes `disabled: true` onto the
+#     rows this package INSERTS — only `lan-access` below — and the official
+#     webserver/connection rows remain untouched and fully alive (loopback
+#     bind + the deployment's own trust fence: the plain dsh behavior);
+#   - there is no service the official rows wait for, so a disabled plugin
+#     can never leave the tree waiting forever (the boot-loop bug the
+#     runtime-owned design exists to avoid);
+#   - --host / --trusted-host invocations keep working when the plugin is
+#     off: the restore writes the same `__jsExpr` nodes the official rows
+#     declare, which the loader re-evaluates against the live services.
+#
+# The single row below is the disable target of dshmarket's toggle and the
+# host of the whole plugin: settings namespace registration, Remote (the
+# settings tab), the runtime row ownership, the noAuth patch and the wiring
+# check. Activation order: this row injects `settings` and `loader`, both
+# provided very early by the base layer, so it activates before the webserver
+# rows finish — it happens to be created later than them, but it does not
+# wait for them, and nothing waits for it.
 
 - insert:
     - id: lan-access
       name: 'dsh-lan-access'
-      inject: [settings]
-
-# ── bind all interfaces when enabled (the webserver schema allows only
-#    127.0.0.1 / 0.0.0.0; a specific LAN IP is expressed as: bind all +
-#    trust the chosen IP on the fence) ───────────────────────────────────────
-
-- id: webserver
-  inject: [webStartup, lanAccess]
-  config:
-    host: !!js ctx.lanAccess.bindHost ?? ctx.webStartup.host ?? '127.0.0.1'
-    port: !!js ctx.webStartup.port ?? 3080
-    compression: gzip
-    compressionLevel: 1
-    compressionThresholdBytes: 1024
-
-# ── strict /api browser-trust fence: the configured hosts ARE the policy ─────
-
-# dsh itself trusts every non-internal IPv4 address whenever the webserver
-# binds 0.0.0.0 (web-app `resolveLanTrust`), so a plain union with
-# `ctx.webRuntime.trustedHosts` silently re-trusts a host the user just
-# removed from accessHosts. While anything is configured, only those
-# authorities pass the fence; the automatic LAN list is a fallback for an
-# enabled-but-empty configuration, which would otherwise lock every LAN
-# visitor out with 403.
-
-- id: connection
-  inject: [webRuntime, lanAccess]
-  config:
-    trustedHosts: !!js 'ctx.lanAccess.trustedHosts.length > 0 ? [...new Set(ctx.lanAccess.trustedHosts)] : [...new Set(ctx.webRuntime.trustedHosts)]'
-    # Browser-session cookie lifetime: the plugin's `sessionDays` (default 30,
-    # the dsh default) decides how long a device stays authenticated after one
-    # token visit. The row is restated in full, so this value lives here too.
-    # `lanAccess.noAuth` needs nothing here: it is applied by the plugin's own
-    # host half (lib/index.js `disableBrowserAuth`), which swaps the service's
-    # session checks instead of anything this row's config owns.
-    cookieMaxAgeDays: !!js ctx.lanAccess.sessionDays
+      inject: [settings, loader]
