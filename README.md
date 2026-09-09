@@ -40,11 +40,24 @@ See `README.zh.md` (Chinese) for the full guide; the English summary:
   another author — this plugin is only distributed from GitHub, not npm.
 - **Use**: Settings → “LAN Access” tab → enable, enter the LAN IP(s) (or pick
   from the detected list), save, restart.
-- **Upgrades**: wiring is id-targeted patches with warned-skip semantics and a
-  boot-time self-check; only brand-new upstream guardrails can defeat it, and
-  the plugin then reports its degraded state instead of pretending. The one
-  place that touches a dsh internal (a prototype patch to revive already-bound
-  settings scopes) is wrapped in `try/catch` and can be switched off entirely.
+- **How it works (0.6.0)**: static composition — zero runtime row
+  ownership. The bundle patch overrides the official `webserver`/`connection`
+  rows with loader `!!js` expressions that decide the bind and the fence ONCE
+  per boot from the `lan-access` entry's disabled state (the very state
+  dshmarket's toggle writes). No `entry.update`, no fiber restarts, no boot
+  rewrites; toggling the plugin — in the settings tab or in the market — only
+  starts/stops its fiber, and the binding changes on the next restart,
+  exactly what the settings tab says. Both expressions fail closed: any
+  evaluation error yields the official defaults (loopback bind, the
+  deployment fence) and can never fail the boot.
+- **Upgrades**: the overrides are patches by id; a renamed or restructured
+  official row is skipped by the composer with a warning (dsh still boots,
+  fully official), and the boot-time self-check reports the drift instead of
+  pretending. Only brand-new upstream guardrails (e.g. a webserver schema
+  dropping `0.0.0.0`) can defeat it. The one place that touches a dsh
+  internal (a prototype patch to revive already-bound settings scopes, and
+  the noAuth gate swap) is wrapped in `try/catch` and can be switched off
+  entirely.
 
 ## License
 

@@ -1,32 +1,69 @@
-# dsh-lan-access bundle patch.
+# dsh-lan-access bundle patch — static composition (0.6.0).
 #
-# THE ROWS ARE NOT PATCHED. The plugin owns the `webserver` and `connection`
-# rows at RUNTIME only (see lib/index.js): on activation it rewrites their
-# config through the loader (0.0.0.0 + the configured authorities, and the
-# optional cookie lifetime), and on deactivation it restores them to exactly
-# the config dsh-web-app's own layer declares. They stay the official rows,
-# so:
+# THE ROWS ARE CONFIGURED, NOT REWRITTEN. This bundle declares three things
+# and performs no row updates at runtime:
 #
-#   - a dshmarket disable of this package writes `disabled: true` onto the
-#     rows this package INSERTS — only `lan-access` below — and the official
-#     webserver/connection rows remain untouched and fully alive (loopback
-#     bind + the deployment's own trust fence: the plain dsh behavior);
-#   - there is no service the official rows wait for, so a disabled plugin
-#     can never leave the tree waiting forever (the boot-loop bug the
-#     runtime-owned design exists to avoid);
-#   - --host / --trusted-host invocations keep working when the plugin is
-#     off: the restore writes the same `__jsExpr` nodes the official rows
-#     declare, which the loader re-evaluates against the live services.
+#   1. `insert:` the single `lan-access` row — the plugin entry itself, and
+#      the ONLY row dshmarket's toggle ever writes `disabled: true` onto
+#      (market manages rows a package inserts, never top-level overrides).
+#      Disabling the package therefore never touches an official row.
 #
-# The single row below is the disable target of dshmarket's toggle and the
-# host of the whole plugin: settings namespace registration, Remote (the
-# settings tab), the runtime row ownership, the noAuth patch and the wiring
-# check. Activation order: this row injects `settings` and `loader`, both
-# provided very early by the base layer, so it activates before the webserver
-# rows finish — it happens to be created later than them, but it does not
-# wait for them, and nothing waits for it.
+#   2. A top-level `webserver` override whose `host` is a loader `!!js`
+#      expression: `0.0.0.0` while the `lan-access` entry is enabled,
+#      `127.0.0.1` (the official expression) while it is disabled. Market's
+#      disable lands as a plain `disabled: true` on the entry before
+#      activation, so the expression reads the final state with no race.
+#      The bind is decided ONCE per boot: toggling the plugin only
+#      starts/stops its fiber — the binding changes on the next restart,
+#      exactly what the settings tab tells the user.
+#
+#   3. A top-level `connection` override that, while enabled, replaces the
+#      browser-trust fence with the configured `accessHosts` (kept only in
+#      the canonical form the fence's own `assertTrustedAuthority` accepts,
+#      so a hand-edited invalid entry can never fail the row) — a non-empty
+#      configuration IS the policy (strict fence, unchanged since 0.2.0);
+#      with nothing configured it falls back to the deployment-derived
+#      `webRuntime.trustedHosts`. It also applies the configured
+#      session-cookie lifetime. While disabled both expressions return the
+#      official ones, so --trusted-host deployments keep working.
+#
+# Overriding by id replaces the matched row's whole `config`, so each
+# override restates every key the official row owns (the official rows live
+# in @deepseek-ai/dsh-web-app/cordis.patch.yml); keys this file does not
+# restate (`name`, the webserver's `inject`) merge from the official row.
+# The `connection` override restates `inject` to add `settings` so the loader
+# only evaluates its expressions once the settings service exists (inject is
+# the loader's activation gate for expression dependencies).
+#
+# Both expressions fail closed: any evaluation error yields the official
+# defaults (loopback bind, the deployment fence) and never fails the boot.
 
 - insert:
     - id: lan-access
       name: 'dsh-lan-access'
       inject: [settings, loader]
+
+# ── static bind + fence overrides (evaluated once per boot) ─────────────────
+
+- id: webserver
+  config:
+    # Loopback while the lan-access entry is disabled (the market toggle
+    # state, composed before activation); all interfaces while enabled.
+    host: !!js (() => { try { const lan = [...ctx.loader.entries()].find((e) => e.options.id === "lan-access"); if (lan?.disabled ?? true) return ctx.webStartup?.host ?? "127.0.0.1"; return "0.0.0.0"; } catch { return ctx.webStartup?.host ?? "127.0.0.1"; } })()
+    port: !!js ctx.webStartup.port ?? 3080
+    compression: gzip
+    compressionLevel: 1
+    compressionThresholdBytes: 1024
+
+- id: connection
+  inject: [webRuntime, settings]
+  config:
+    # While enabled: the configured accessHosts (canonical form only) ARE
+    # the policy — with a non-empty configuration nothing else passes the
+    # fence; the deployment-derived webRuntime.trustedHosts is only the
+    # fallback for an empty configuration. While disabled: the official
+    # expression untouched.
+    trustedHosts: !!js (() => { try { const lan = [...ctx.loader.entries()].find((e) => e.options.id === "lan-access"); if (lan?.disabled ?? true) return ctx.webRuntime.trustedHosts; const raw = ctx.get("settings").section("lan-access"); let list = []; if (raw !== null && typeof raw === "object" && Array.isArray(raw.accessHosts)) list = raw.accessHosts; const out = []; const seen = new Set(); for (const h of list) { if (typeof h !== "string" || seen.has(h.toLowerCase())) continue; try { const u = new URL("http://" + h); let port = u.port; if (port === "") port = new URL("https://" + h).port; let canon = u.hostname; if (port !== "") canon = canon + ":" + port; if (canon !== h.toLowerCase()) continue; } catch { continue; } seen.add(h.toLowerCase()); out.push(h); } if (out.length > 0) return out; return ctx.webRuntime.trustedHosts; } catch { return ctx.webRuntime.trustedHosts; } })()
+    # The configured browser-session lifetime; the official default (30)
+    # while disabled or unconfigured.
+    cookieMaxAgeDays: !!js (() => { try { const lan = [...ctx.loader.entries()].find((e) => e.options.id === "lan-access"); if (lan?.disabled ?? true) return 30; const raw = ctx.get("settings").section("lan-access"); let days = void 0; if (raw !== null && typeof raw === "object") days = raw.sessionDays; if (Number.isSafeInteger(days)) return Math.min(Math.max(days, 1), 3650); return 30; } catch { return 30; } })()

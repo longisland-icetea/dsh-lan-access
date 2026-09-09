@@ -48,7 +48,7 @@ dsh 自己在 webserver 绑定 `0.0.0.0` 时会信任**所有非内部 IPv4**（
 - **配置了地址** → 只有这些地址能过 `/api` 围栏，dsh 自动信任的那份不再并入；
 - **一个地址都没配** → 回退到 dsh 的自动信任，否则「启用但没配」会把所有局域网访客 403 锁死。
 
-想退回 0.1.x 的并集行为，把 `cordis.patch.yml` 里 `connection` 行的表达式改回 `[...new Set([...ctx.lanAccess.trustedHosts, ...ctx.webRuntime.trustedHosts])]` 即可。
+想退回 0.1.x 的并集行为，把 `cordis.patch.yml` 里 `connection` 行 `trustedHosts` 表达式中「配置非空则直接返回配置」的分支改成「配置与 `ctx.webRuntime.trustedHosts` 取并集」即可。
 
 > 注意：启动日志里 `dsh web: ... (LAN: http://<ip>:<port>/?token=...)` 是 dsh 自己按 `lanAddresses[0]` 打印的，严格模式下**未必可用**；以插件自己那行 `dsh-lan-access: LAN: ...` 为准。
 
@@ -106,14 +106,20 @@ lan-access:
 - 改动需要重启 `dsh web`；生效时启动日志会打印 `dsh-lan-access: browser authentication removed (noAuth) ...`。若打印的是 `... exposes no browser authentication to remove`，说明你装的 dsh 改了 `connection` 的方法名，此时 dsh 的登录照旧（插件不会假装成功）。
 - 它改的是 `connection` 服务**原型**上的方法（dsh 内部结构）。补丁带还原函数，挂在插件 fiber 上随插件卸载一起撤销；和「设置层救援」一样，最坏情况是降级回 dsh 原行为，不会白屏。
 
-## 工作原理（插件结构）
+## 工作原理（插件结构，0.6.0 起）
 
-- **`cordis.patch.yml`**（bundle 层）：插入插件自身行 `lan-access`，并按 id 覆盖 `webserver`、`connection` 两行的配置。
-  - `webserver.host = ctx.lanAccess.bindHost ?? ctx.webStartup.host ?? '127.0.0.1'`
-  - `connection.trustedHosts = 插件信任表非空 ? 插件信任表 : webRuntime 信任表`（**严格围栏**：配置即策略，见下）
-  - `connection.cookieMaxAgeDays = ctx.lanAccess.sessionDays`（浏览器会话有效期，默认 30）
-- **宿主端 `lib/index.js`**：注册 `lan-access` 设置命名空间（`enabled` + `accessHosts` + `rescueSettings` + `noAuth` + `sessionDays`），提供 `lanAccess` 快照服务，暴露一个 Typert Remote（`lanAccess/overview`），启动后校验两层覆盖是否真正生效，按 `noAuth` 决定是否摘掉浏览器鉴权，并打印局域网 URL（免鉴权时不带 token）。
+0.6.0 改为**静态组合、零运行时行所有权**：绑定与围栏由 bundle patch 里的 loader `!!js` 表达式在**每次启动时求值一次**决定，进程运行期间不再改任何行：
+
+- **`cordis.patch.yml`**（bundle 层）做三件事：
+  1. `insert:` 插件自身行 `lan-access`（market 开关只会把 `disabled` 写在这一行上，永远碰不到官方行）；
+  2. 按 id 覆盖 `webserver` 行：`host` 是表达式——`lan-access` 条目启用时为 `0.0.0.0`，禁用时为官方表达式（`ctx.webStartup.host ?? '127.0.0.1'`）；
+  3. 按 id 覆盖 `connection` 行：`trustedHosts` 在启用时为「配置的 `accessHosts`（严格围栏，配置即策略；为空才回退到 `ctx.webRuntime.trustedHosts`）」，禁用时为官方表达式；`cookieMaxAgeDays` 同理取 `sessionDays`（默认 30）。
+
+  表达式通过 `[...ctx.loader.entries()]` 读取 `lan-access` 条目的 `disabled` 状态——这正是 dshmarket 开关在启动前写进组合层的那一位，因此**没有时序竞态**；两条表达式全部失败闭合（任何求值错误都回退官方默认，绝不导致启动失败）。
+- **宿主端 `lib/index.js`**：注册 `lan-access` 设置命名空间（`enabled` + `accessHosts` + `rescueSettings` + `noAuth` + `sessionDays`），暴露 `lanAccess/overview` Remote，启动后**只读**校验覆盖是否生效（不重写、不 `entry.update`），按 `noAuth` 决定是否摘掉浏览器鉴权，并打印局域网 URL（免鉴权时不带 token）。
 - **浏览器端 `lib/client.js`**：注册“局域网访问”设置选项卡（`settings.section` 槽位），读写 `remote.settings`，调用 `lanAccess/overview` 展示本机 IP 候选和生效状态。
+
+**开关语义 = 重启生效**：设置页保存、或 market 里禁用/启用，都只改变组合层里 `lan-access` 条目的状态（market 写 patch、设置页写 settings），下次 `dsh web` 重启时表达式求值出新的绑定与围栏。运行中的进程保持原状，Remote 的 overview 会如实报告 `live vs configured` 差异（设置页文案本就写的是“重启后生效”）。
 
 插件**零运行时依赖**（宿主端只 import Node 内置模块；设置 schema 为可调用对象，Remote 用鸭子类型绑定），因此无论以 registry、tarball 还是本地 `link:` 安装都能工作，也不与 dsh 安装里的模块副本发生实例冲突。
 
@@ -121,10 +127,10 @@ lan-access:
 
 设计目标是**噪音式降级，而不是静默失效**：
 
-- 所有针对 dsh 内部行的修改都是**按 id 的 patch**；某行 id 或结构变化时，patch 会警告并跳过（不会让 dsh 启动失败），插件启动时还会再校验一次并打印 `dsh-lan-access: LAN wiring did NOT take effect ...`。
-- 插件只依赖稳定的公开接缝：`settings` 服务、`webStartup` / `webRuntime` 服务形状、`connection` 的 `trustedHosts`、`settings.section` / `settings.onboarding` 槽位、`remote.settings`。
+- 针对 dsh 官方行的覆盖是**按 id 的 patch**；某行 id 或结构变化时，组合器会警告并跳过该条（dsh 照常启动、完全回到官方行为），插件启动时的只读校验会打印 `LAN access configured but not live ...`，并提示“重启后若仍不生效，可能是该 dsh 版本改了 `webserver`/`connection` 行的结构”。
+- 两条 `!!js` 表达式**失败闭合**：任何求值错误都回退到官方默认（回环绑定 / 部署默认信任表），不会让 dsh 启动失败。
+- 插件只依赖稳定的公开接缝：`settings` 服务、`webStartup` / `webRuntime` 服务形状、`loader.entries()` 的条目状态、`connection` 的 `trustedHosts`、`settings.section` / `settings.onboarding` 槽位、`remote.settings`。
 - 唯一碰 dsh 内部结构的两处是「设置层救援」对 `SettingsScopeController` 原型、以及「免鉴权」对 `connection` 服务原型的补丁，都整段包在 `try/catch` 里（免鉴权找不到目标方法时只警告并跳过）：dsh 若改了这些类，最坏结果是相应功能静默失效（救援失效则那几个卡片继续报 `settings are unavailable`；免鉴权失效则继续要 token），不会白屏或启动失败。可分别用 `rescueSettings: false` / `noAuth: false` 关掉。
-- 如果在升级后看到 `wiring did NOT take effect`，按 README 的“排查”一节处理即可。
 
 唯一无法防护的是 dsh 侧**新增护栏**（例如 webserver schema 以后拒绝 `0.0.0.0`，或 CLI 护栏搬到配置层）——那种情况下护栏会赢，插件会如实报告降级状态。
 
@@ -133,7 +139,7 @@ lan-access:
 | 现象 | 原因 / 处理 |
 | --- | --- |
 | 设置页选项卡不显示 | 插件行未挂载：检查 `dsh --profile web --dump-config` 里是否有 `lan-access` 行；确认 profile 的 `dsh.profile.bundles` 含 `dsh-lan-access` |
-| 启动日志出现 `LAN wiring did NOT take effect` | 你安装的 dsh 版本改了 `webserver` / `connection` 行的 id 或结构；检查 `cordis.patch.yml` 中的目标行是否仍存在，必要时更新插件 |
+| 启动日志出现 `LAN access configured but not live` | 重启 `dsh web` 让表达式重新求值即可；若重启后依旧，说明该 dsh 版本改了 `webserver` / `connection` 行的 id 或结构（组合器已警告跳过），需要更新插件 |
 | 局域网访问打不开（403） | 围栏未信任该地址：确认设置里填的地址规范（纯 IP 或 域名，`host:port` 均可），或该地址不在 webserver 正在监听的网卡上 |
 | 局域网访问提示 401 | 需要带 token 的 URL 先换 cookie；重启 `dsh web` 看打印的 `dsh-lan-access: LAN:` 行。不想每次都来这一遍就开 `noAuth` |
 | 开了 `noAuth` 还是 401 | 改动需重启 `dsh web`；重启后看日志里有没有 `browser authentication removed (noAuth)`。若出现 `exposes no browser authentication to remove`，说明该 dsh 版本的 `connection` 方法名变了，插件未接管（dsh 登录照旧） |
@@ -148,7 +154,7 @@ lan-access:
 
 ## 与 `--host 0.0.0.0` 护栏的关系
 
-`dsh web --host 0.0.0.0` 在 CLI 层被明确拒绝（安全护栏）。本插件通过组合配置（bundle patch 层）实现同样的“全接口监听”，这是插件的设计意图，也是它的全部功能边界——它不是一个通用“绕过 dsh 安全限制”的工具。
+`dsh web --host 0.0.0.0` 在 CLI 层被明确拒绝（安全护栏）。本插件通过组合配置（bundle patch 层、启动时求值的 `!!js` 表达式）实现同样的“全接口监听”，这是插件的设计意图，也是它的全部功能边界——它不是一个通用“绕过 dsh 安全限制”的工具。
 
 ## License
 
