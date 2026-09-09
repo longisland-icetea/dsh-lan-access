@@ -9,15 +9,17 @@
 #      Disabling the package therefore never touches an official row.
 #
 #   2. A top-level `webserver` override whose `host` is a loader `!!js`
-#      expression: `0.0.0.0` while the `lan-access` entry is enabled,
-#      `127.0.0.1` (the official expression) while it is disabled. Market's
+#      expression: `0.0.0.0` only while the `lan-access` entry is enabled
+#      AND the settings-tab toggle (`settings.yaml` lan-access.enabled) is
+#      on; `127.0.0.1` (the official expression) otherwise. Market's
 #      disable lands as a plain `disabled: true` on the entry before
 #      activation, so the expression reads the final state with no race.
 #      The bind is decided ONCE per boot: toggling the plugin only
 #      starts/stops its fiber — the binding changes on the next restart,
 #      exactly what the settings tab tells the user.
 #
-#   3. A top-level `connection` override that, while enabled, replaces the
+#   3. A top-level `connection` override that, while enabled (entry not
+#      disabled AND the settings-tab toggle on), replaces the
 #      browser-trust fence with the configured `accessHosts` (kept only in
 #      the canonical form the fence's own `assertTrustedAuthority` accepts,
 #      so a hand-edited invalid entry can never fail the row) — a non-empty
@@ -46,10 +48,12 @@
 # ── static bind + fence overrides (evaluated once per boot) ─────────────────
 
 - id: webserver
+  inject: [webStartup, settings]
   config:
     # Loopback while the lan-access entry is disabled (the market toggle
-    # state, composed before activation); all interfaces while enabled.
-    host: !!js (() => { try { const lan = [...ctx.loader.entries()].find((e) => e.options.id === "lan-access"); if (lan?.disabled ?? true) return ctx.webStartup?.host ?? "127.0.0.1"; return "0.0.0.0"; } catch { return ctx.webStartup?.host ?? "127.0.0.1"; } })()
+    # state, composed before activation) or while the settings-tab toggle
+    # is off; all interfaces only when both say enabled.
+    host: !!js (() => { try { const lan = [...ctx.loader.entries()].find((e) => e.options.id === "lan-access"); if (lan?.disabled ?? true) return ctx.webStartup?.host ?? "127.0.0.1"; const raw = ctx.get("settings").section("lan-access"); if (!(raw !== null && typeof raw === "object" && raw.enabled === true)) return ctx.webStartup?.host ?? "127.0.0.1"; return "0.0.0.0"; } catch { return ctx.webStartup?.host ?? "127.0.0.1"; } })()
     port: !!js ctx.webStartup.port ?? 3080
     compression: gzip
     compressionLevel: 1
@@ -58,12 +62,14 @@
 - id: connection
   inject: [webRuntime, settings]
   config:
-    # While enabled: the configured accessHosts (canonical form only) ARE
-    # the policy — with a non-empty configuration nothing else passes the
-    # fence; the deployment-derived webRuntime.trustedHosts is only the
-    # fallback for an empty configuration. While disabled: the official
-    # expression untouched.
-    trustedHosts: !!js (() => { try { const lan = [...ctx.loader.entries()].find((e) => e.options.id === "lan-access"); if (lan?.disabled ?? true) return ctx.webRuntime.trustedHosts; const raw = ctx.get("settings").section("lan-access"); let list = []; if (raw !== null && typeof raw === "object" && Array.isArray(raw.accessHosts)) list = raw.accessHosts; const out = []; const seen = new Set(); for (const h of list) { if (typeof h !== "string" || seen.has(h.toLowerCase())) continue; try { const u = new URL("http://" + h); let port = u.port; if (port === "") port = new URL("https://" + h).port; let canon = u.hostname; if (port !== "") canon = canon + ":" + port; if (canon !== h.toLowerCase()) continue; } catch { continue; } seen.add(h.toLowerCase()); out.push(h); } if (out.length > 0) return out; return ctx.webRuntime.trustedHosts; } catch { return ctx.webRuntime.trustedHosts; } })()
-    # The configured browser-session lifetime; the official default (30)
+    # While enabled (entry not disabled AND settings-tab toggle on): the
+    # configured accessHosts (canonical form only) ARE the policy — with a
+    # non-empty configuration nothing else passes the fence; the
+    # deployment-derived webRuntime.trustedHosts is only the fallback for
+    # an empty configuration. While disabled: the official expression
+    # untouched.
+    trustedHosts: !!js (() => { try { const lan = [...ctx.loader.entries()].find((e) => e.options.id === "lan-access"); if (lan?.disabled ?? true) return ctx.webRuntime.trustedHosts; const raw = ctx.get("settings").section("lan-access"); if (!(raw !== null && typeof raw === "object" && raw.enabled === true)) return ctx.webRuntime.trustedHosts; let list = []; if (Array.isArray(raw.accessHosts)) list = raw.accessHosts; const out = []; const seen = new Set(); for (const h of list) { if (typeof h !== "string" || seen.has(h.toLowerCase())) continue; try { const u = new URL("http://" + h); let port = u.port; if (port === "") port = new URL("https://" + h).port; let canon = u.hostname; if (port !== "") canon = canon + ":" + port; if (canon !== h.toLowerCase()) continue; } catch { continue; } seen.add(h.toLowerCase()); out.push(h); } if (out.length > 0) return out; return ctx.webRuntime.trustedHosts; } catch { return ctx.webRuntime.trustedHosts; } })()
+    # The configured browser-session lifetime while enabled (entry not
+    # disabled AND settings-tab toggle on); the official default (30)
     # while disabled or unconfigured.
-    cookieMaxAgeDays: !!js (() => { try { const lan = [...ctx.loader.entries()].find((e) => e.options.id === "lan-access"); if (lan?.disabled ?? true) return 30; const raw = ctx.get("settings").section("lan-access"); let days = void 0; if (raw !== null && typeof raw === "object") days = raw.sessionDays; if (Number.isSafeInteger(days)) return Math.min(Math.max(days, 1), 3650); return 30; } catch { return 30; } })()
+    cookieMaxAgeDays: !!js (() => { try { const lan = [...ctx.loader.entries()].find((e) => e.options.id === "lan-access"); if (lan?.disabled ?? true) return 30; const raw = ctx.get("settings").section("lan-access"); if (!(raw !== null && typeof raw === "object" && raw.enabled === true)) return 30; const days = raw.sessionDays; if (Number.isSafeInteger(days)) return Math.min(Math.max(days, 1), 3650); return 30; } catch { return 30; } })()

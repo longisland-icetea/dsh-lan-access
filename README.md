@@ -43,13 +43,15 @@ See `README.zh.md` (Chinese) for the full guide; the English summary:
 - **How it works (0.6.0)**: static composition — zero runtime row
   ownership. The bundle patch overrides the official `webserver`/`connection`
   rows with loader `!!js` expressions that decide the bind and the fence ONCE
-  per boot from the `lan-access` entry's disabled state (the very state
-  dshmarket's toggle writes). No `entry.update`, no fiber restarts, no boot
-  rewrites; toggling the plugin — in the settings tab or in the market — only
-  starts/stops its fiber, and the binding changes on the next restart,
-  exactly what the settings tab says. Both expressions fail closed: any
-  evaluation error yields the official defaults (loopback bind, the
-  deployment fence) and can never fail the boot.
+  per boot from two bits composed before activation: the `lan-access` entry's
+  disabled state (the very state dshmarket's toggle writes) and the
+  settings-tab toggle (`settings.yaml` `lan-access.enabled`). No
+  `entry.update`, no fiber restarts, no boot rewrites; toggling the plugin —
+  in the settings tab or in the market — only starts/stops its fiber, and
+  the binding changes on the next restart, exactly what the settings tab
+  says. The expressions fail closed: any evaluation error yields the
+  official defaults (loopback bind, the deployment fence) and can never
+  fail the boot.
 - **Upgrades**: the overrides are patches by id; a renamed or restructured
   official row is skipped by the composer with a warning (dsh still boots,
   fully official), and the boot-time self-check reports the drift instead of

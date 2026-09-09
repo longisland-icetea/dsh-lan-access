@@ -112,14 +112,14 @@ lan-access:
 
 - **`cordis.patch.yml`**（bundle 层）做三件事：
   1. `insert:` 插件自身行 `lan-access`（market 开关只会把 `disabled` 写在这一行上，永远碰不到官方行）；
-  2. 按 id 覆盖 `webserver` 行：`host` 是表达式——`lan-access` 条目启用时为 `0.0.0.0`，禁用时为官方表达式（`ctx.webStartup.host ?? '127.0.0.1'`）；
-  3. 按 id 覆盖 `connection` 行：`trustedHosts` 在启用时为「配置的 `accessHosts`（严格围栏，配置即策略；为空才回退到 `ctx.webRuntime.trustedHosts`）」，禁用时为官方表达式；`cookieMaxAgeDays` 同理取 `sessionDays`（默认 30）。
+  2. 按 id 覆盖 `webserver` 行：`host` 是表达式——`lan-access` 条目启用**且**设置页「打开局域网访问」开启时为 `0.0.0.0`，否则为官方表达式（`ctx.webStartup.host ?? '127.0.0.1'`）；
+  3. 按 id 覆盖 `connection` 行：`trustedHosts` 在两个开关都开启时为「配置的 `accessHosts`（严格围栏，配置即策略；为空才回退到 `ctx.webRuntime.trustedHosts`）」，否则为官方表达式；`cookieMaxAgeDays` 同理取 `sessionDays`（默认 30）。
 
-  表达式通过 `[...ctx.loader.entries()]` 读取 `lan-access` 条目的 `disabled` 状态——这正是 dshmarket 开关在启动前写进组合层的那一位，因此**没有时序竞态**；两条表达式全部失败闭合（任何求值错误都回退官方默认，绝不导致启动失败）。
+  表达式通过 `[...ctx.loader.entries()]` 读取 `lan-access` 条目的 `disabled` 状态（dshmarket 开关在启动前写进组合层的那一位），并通过注入的 `settings` 服务读 `settings.yaml` 的 `lan-access.enabled`（设置页开关）——两者都在启动前就位，因此**没有时序竞态**；表达式全部失败闭合（任何求值错误都回退官方默认，绝不导致启动失败）。
 - **宿主端 `lib/index.js`**：注册 `lan-access` 设置命名空间（`enabled` + `accessHosts` + `rescueSettings` + `noAuth` + `sessionDays`），暴露 `lanAccess/overview` Remote，启动后**只读**校验覆盖是否生效（不重写、不 `entry.update`），按 `noAuth` 决定是否摘掉浏览器鉴权，并打印局域网 URL（免鉴权时不带 token）。
 - **浏览器端 `lib/client.js`**：注册“局域网访问”设置选项卡（`settings.section` 槽位），读写 `remote.settings`，调用 `lanAccess/overview` 展示本机 IP 候选和生效状态。
 
-**开关语义 = 重启生效**：设置页保存、或 market 里禁用/启用，都只改变组合层里 `lan-access` 条目的状态（market 写 patch、设置页写 settings），下次 `dsh web` 重启时表达式求值出新的绑定与围栏。运行中的进程保持原状，Remote 的 overview 会如实报告 `live vs configured` 差异（设置页文案本就写的是“重启后生效”）。
+**开关语义 = 重启生效**：设置页保存、或 market 里禁用/启用，都只改变组合层里的状态（market 写 patch 的 `disabled`、设置页写 settings 的 `enabled`），下次 `dsh web` 重启时表达式求值出新的绑定与围栏。运行中的进程保持原状，Remote 的 overview 会如实报告 `live vs configured` 差异（设置页文案本就写的是“重启后生效”）。
 
 插件**零运行时依赖**（宿主端只 import Node 内置模块；设置 schema 为可调用对象，Remote 用鸭子类型绑定），因此无论以 registry、tarball 还是本地 `link:` 安装都能工作，也不与 dsh 安装里的模块副本发生实例冲突。
 
